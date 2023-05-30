@@ -19,10 +19,10 @@
     (if (empty? chars)
         (if (member state (dfa-accept-states dfa-to-eval)) ; if state is valid
             (if (eq? state 'spa) ; if final state is 'spa ignore in output
-                (displayTokens (reverse tokens)) ; 
-                (displayTokens (reverse (cons (list (list->string (reverse value)) state) tokens)))
+                (reverse tokens) ; result 
+                (reverse (cons (list (list->string (reverse value)) state) tokens))
                 )
-            'invalid) ; if expression is wrong, return invalid
+            #f) ; if expression is wrong, return invalid
         (let-values ([(new-state token-found) ((dfa-func dfa-to-eval) state (car chars))])
           (loop (cdr chars)
                 new-state ; new state
@@ -33,7 +33,9 @@
                     (if token-found
                     (cons (car chars) '()) 
                     (cons (car chars) value))
-                    '()))))))
+                    (if (eq? state 'comment) ; it the state is a comment, whitespace is not ignored
+                        (cons (car chars) value)
+                        '())))))))
 
 
 ; transition function to determine if an input is a math expression
@@ -44,11 +46,11 @@
               [(or (eq? char #\-)(eq? char #\+)) (values 'sign #f)]
               [(char-numeric? char) (values 'int #f)]
               [(or (char-alphabetic? char) (eq? char #\_)) (values 'var #f)]
-              [(eq? char #\() (values 'open_par #f)]
+              [(eq? char #\() (values 'par_open #f)]
               [(char-whitespace? char) (values 'init_spa #f)]
               [else (values 'inv #f)])]
     ['init_spa (cond 
-                [(eq? char #\() (values 'open_par #f)] 
+                [(eq? char #\() (values 'par_open #f)] 
                 [(or (char-alphabetic? char) (eq? char #\_)) (values 'var #f)]
                 [(char-numeric? char) (values 'int #f)]
                 [(char-whitespace? char) (values 'init_spa #f)]
@@ -64,7 +66,7 @@
             [(or (eq? char #\e) (eq? char #\E)) (values 'e #f)]
             [(char-whitespace? char) (values 'spa 'int)]
             [(or (eq? char #\+) (eq? char #\-) (eq? char #\*) (eq? char #\/) (eq? char #\=) (eq? char #\^)) (values 'op 'int)]
-            [(eq? char #\)) (values 'close_par 'int)]
+            [(eq? char #\)) (values 'par_close 'int)]
             [else (values 'inv #f)])]
     ['dot (cond
             [(char-numeric? char) (values 'float #f)]
@@ -74,7 +76,7 @@
               [(or (eq? char #\e) (eq? char #\E)) (values 'e #f)]
               [(char-whitespace? char) (values 'spa 'float)]
               [(or (eq? char #\+) (eq? char #\-) (eq? char #\*) (eq? char #\/) (eq? char #\=) (eq? char #\^)) (values 'op 'float)]
-              [(eq? char #\)) (values 'close_par 'float)]
+              [(eq? char #\)) (values 'par_close 'float)]
               [else (values 'inv #f)])]
     ['e (cond
           [(char-numeric? char) (values 'exp #f)]
@@ -84,14 +86,14 @@
             [(char-numeric? char) (values 'exp #f)]
             [(char-whitespace? char) (values 'spa 'exp)]
             [(or (eq? char #\+) (eq? char #\-) (eq? char #\*) (eq? char #\/) (eq? char #\=) (eq? char #\^)) (values 'op 'exp)]
-            [(eq? char #\)) (values 'close_par 'exp)]
+            [(eq? char #\)) (values 'par_close 'exp)]
             [else (values 'inv #f)])]
     ['e_sign (cond
                [(char-numeric? char) (values 'exp #f)]
                [else (values 'inv #f)])]
     ['spa (cond
             [(or (eq? char #\+) (eq? char #\-) (eq? char #\*) (eq? char #\/) (eq? char #\=) (eq? char #\^)) (values 'op #f)]
-            [(eq? char #\)) (values 'close_par #f)]
+            [(eq? char #\)) (values 'par_close #f)]
             [(char-whitespace? char) (values 'spa #f)]
             [else (values 'inv #f)])]
     ['op (cond
@@ -99,26 +101,31 @@
            [(or (char-alphabetic? char) (eq? char #\_)) (values 'var 'op)]
            [(char-numeric? char) (values 'int 'op)]
            [(or (eq? char #\+) (eq? char #\-)) (values 'sign 'op)]
-           [(eq? char #\() (values 'open_par 'op)]
+           [(eq? char #\() (values 'par_open 'op)]
+           [(eq? char #\/) (values 'comment #f)] ; added comment
            [else (values 'inv #f)])]
     ['op_spa (cond
                [(or (char-alphabetic? char) (eq? char #\_)) (values 'var #f)]
                [(char-numeric? char) (values 'int #f)]
-               [(eq? char #\() (values 'open_par #f)]
+               [(eq? char #\() (values 'par_open #f)]
                [(char-whitespace? char) (values 'op_spa #f)]
+               [(or (eq? char #\+) (eq? char #\-)) (values 'sign #f)] ; consider negatives after op_spa
                [else (values 'inv #f)])]
+    ['comment (cond
+               [(char-alphabetic? char) (values 'comment #f)]
+               [(char-whitespace? char) (values 'comment #f)])] ; comment
     ['var (cond
             [(or (eq? char #\+) (eq? char #\-) (eq? char #\*) (eq? char #\/) (eq? char #\=) (eq? char #\^)) (values 'op 'var)]
             [(or (char-alphabetic? char) (eq? char #\_) (char-numeric? char)) (values 'var #f)]
             [(char-whitespace? char) (values 'spa 'var)]
-            [(eq? char #\)) (values 'close_par 'var)]
+            [(eq? char #\)) (values 'par_close 'var)]
             [else (values 'inv #f)]
             )]
-    ['open_par (cond
-                 [(char-numeric? char) (values 'int 'open_par)]
-                 [(char-whitespace? char) (values 'parenthesis_spa 'open_par)]
-                 [(or (char-alphabetic? char) (eq? char #\_)) (values 'var 'open_var)]
-                 [(or (eq? char #\+) (eq? char #\-)) (values 'sign 'open_par)]
+    ['par_open (cond
+                 [(char-numeric? char) (values 'int 'par_open)]
+                 [(char-whitespace? char) (values 'parenthesis_spa 'par_open)]
+                 [(or (char-alphabetic? char) (eq? char #\_)) (values 'var 'par_open)]
+                 [(or (eq? char #\+) (eq? char #\-)) (values 'sign 'par_open)]
                  [else (values 'inv #f)])]
     ['parenthesis_spa (cond
                         [(char-numeric? char) (values 'int #f)]
@@ -127,26 +134,17 @@
                         [(char-whitespace? char) (values 'parenthesis_spa #f)]
                         [else (values 'inv #f)]                       
                         )]
-    ['close_par (cond
-                  [(or (eq? char #\+) (eq? char #\-) (eq? char #\*) (eq? char #\/) (eq? char #\=) (eq? char #\^)) (values 'op 'close_par)]
-                  [(char-whitespace? char) (values 'spa 'close_par)]
+    ['par_close (cond
+                  [(or (eq? char #\+) (eq? char #\-) (eq? char #\*) (eq? char #\/) (eq? char #\=) (eq? char #\^)) (values 'op 'par_close)]
+                  [(char-whitespace? char) (values 'spa 'par_close)]
                   [else (values 'inv #f)]
                   )]
     [else (values 'inv #f)]))
 
 
-; function to display tokens 
-(define (displayTokens lst)
-  (let loop ([lst lst] [result (format "Value     Token ~n~n")])
-    (if (empty? lst)
-        (displayln result)
-        (loop (cdr lst) (string-append result (format " ~a        ~a ~n ~n"
-                                                      (first (car lst))
-                                                      (second (car lst))))))))
-
 
 ; dfa instance to be used
-(define dfa-instance (dfa transition-fn 'start '(int float exp var spa close_par)))
+(define dfa-instance (dfa transition-fn 'start '(int float exp var spa par_close comment)))
 
 ; arithmetic lexer definition
 (define (arithmetic-lexer str)
